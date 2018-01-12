@@ -1,6 +1,7 @@
 ﻿using AngleSharp.Parser.Html;
 using Microsoft.SharePoint.Client;
 using Newtonsoft.Json;
+using OfficeDevPnP.Core.Utilities;
 using System;
 using System.Diagnostics;
 using System.Linq;
@@ -364,7 +365,12 @@ namespace OfficeDevPnP.Core.Pages
                     }
                     else
                     {
-                        return null;
+                        if (this.sections.Count == 0)
+                        {
+                            this.sections.Add(new CanvasSection(this, CanvasSectionTemplate.OneColumn, 0));
+                        }
+
+                        return sections.First();
                     }
                 }
             }
@@ -661,6 +667,14 @@ namespace OfficeDevPnP.Core.Pages
             };
 
             var pagesLibrary = page.Context.Web.GetListByUrl(page.PagesLibrary, p => p.RootFolder);
+            
+            // Not all sites do have a pages library, throw a nice exception in that case
+            if (pagesLibrary == null)
+            {
+                cc.Web.EnsureProperty(w => w.Url);
+                throw new ArgumentException($"Site {cc.Web.Url} does not have a sitepages library and therefore this page can't be a client side page.");
+            }
+
             page.sitePagesServerRelativeUrl = pagesLibrary.RootFolder.ServerRelativeUrl;
 
             var file = page.Context.Web.GetFileByServerRelativeUrl($"{page.sitePagesServerRelativeUrl}/{page.pageName}");
@@ -678,6 +692,7 @@ namespace OfficeDevPnP.Core.Pages
             if (item.FieldValues.ContainsKey(ClientSidePage.ClientSideApplicationId) && item[ClientSideApplicationId] != null && item[ClientSideApplicationId].ToString().Equals(ClientSidePage.SitePagesFeatureId, StringComparison.InvariantCultureIgnoreCase))
             {
                 page.pageListItem = item;
+                page.PageTitle = Convert.ToString(item[ClientSidePage.Title]);
 
                 // set layout type
                 if (item.FieldValues.ContainsKey(ClientSidePage.PageLayoutType) && item[ClientSidePage.PageLayoutType] != null && !string.IsNullOrEmpty(item[ClientSidePage.PageLayoutType].ToString()))
@@ -726,7 +741,7 @@ namespace OfficeDevPnP.Core.Pages
                 item = this.spPagesLibrary.RootFolder.Files.AddTemplateFile(serverRelativePageName, TemplateFileType.ClientSidePage).ListItemAllFields;
                 // Fix page to be modern
                 item[ClientSidePage.ContentTypeId] = BuiltInContentTypeId.ModernArticlePage;
-                item[ClientSidePage.Title] = string.IsNullOrWhiteSpace(this.pageTitle) ? System.IO.Path.GetFileNameWithoutExtension(this.pageName) : pageTitle;
+                item[ClientSidePage.Title] = string.IsNullOrWhiteSpace(this.pageTitle) ? System.IO.Path.GetFileNameWithoutExtension(this.pageName) : this.pageTitle;
                 item[ClientSidePage.ClientSideApplicationId] = ClientSidePage.SitePagesFeatureId;
                 item[ClientSidePage.PageLayoutType] = this.layoutType.ToString();
                 if (this.layoutType == ClientSidePageLayoutType.Article)
@@ -741,6 +756,10 @@ namespace OfficeDevPnP.Core.Pages
             else
             {
                 item = pageFile.ListItemAllFields;
+                if (!string.IsNullOrWhiteSpace(this.pageTitle))
+                {
+                    item[ClientSidePage.Title] = this.pageTitle;
+                }
             }
 
             // Persist to page field
@@ -893,9 +912,7 @@ namespace OfficeDevPnP.Core.Pages
             }
 
             // Request information about the available client side components from SharePoint
-            Task<String> availableClientSideComponentsJson = Task.WhenAny(
-                GetClientSideWebPartsAsync(this.accessToken, this.Context)
-                ).Result;
+            Task<String> availableClientSideComponentsJson = Task.Run(() => GetClientSideWebPartsAsync(this.accessToken, this.Context).Result);
 
             if (String.IsNullOrEmpty(availableClientSideComponentsJson.Result))
             {
@@ -927,15 +944,6 @@ namespace OfficeDevPnP.Core.Pages
         /// </summary>
         public void Publish()
         {
-            Publish("");
-        }
-
-        /// <summary>
-        /// Publishes a client side page
-        /// </summary>
-        /// <param name="publishMessage">Publish message</param>
-        public void Publish(string publishMessage)
-        {
             // Load the page
             string serverRelativePageName;
             File pageFile;
@@ -947,9 +955,18 @@ namespace OfficeDevPnP.Core.Pages
                 // connect up the page list item for future reference
                 this.pageListItem = pageFile.ListItemAllFields;
                 // publish the page
-                pageFile.Publish(publishMessage);
-                this.Context.ExecuteQueryRetry();
+                pageFile.PublishFileToLevel(FileLevel.Published);
             }
+        }
+
+        /// <summary>
+        /// Publishes a client side page
+        /// </summary>
+        /// <param name="publishMessage">Publish message</param>
+        [Obsolete("Please use the Publish() method instead. This method will be removed in the March 2018 release.")]
+        public void Publish(string publishMessage)
+        {
+            this.Publish();
         }
 
         /// <summary>
@@ -1023,6 +1040,7 @@ namespace OfficeDevPnP.Core.Pages
 
             this.Context.Web.EnsureProperty(p => p.RootFolder);
             this.Context.Web.RootFolder.WelcomePage = $"{this.PagesLibrary}/{this.PageListItem[ClientSidePage.FileLeafRef].ToString()}";
+            this.Context.Web.RootFolder.Update();
             this.Context.ExecuteQueryRetry();
         }
         #endregion
@@ -1154,10 +1172,13 @@ namespace OfficeDevPnP.Core.Pages
                     }
                     else if (controlType == typeof(ClientSideWebPart))
                     {
-                        var control = new ClientSideWebPart();
+                        var control = new ClientSideWebPart()
+                        {
+                            Order = controlOrder
+                        };
                         control.FromHtml(clientSideControl);
 
-                        // Handle control positioning in sections and columlns
+                        // Handle control positioning in sections and columns
                         ApplySectionAndColumn(control, control.SpControlData.Position);
 
                         this.AddControl(control);
@@ -1180,7 +1201,6 @@ namespace OfficeDevPnP.Core.Pages
                         var currentColumn = currentSection.Columns.Where(p => p.Order == sectionData.Position.SectionIndex).FirstOrDefault();
                         if (currentColumn == null)
                         {
-                            //CanvasColumn newColumn = new CanvasColumn(currentSection);
                             currentSection.AddColumn(new CanvasColumn(currentSection, sectionData.Position.SectionIndex, sectionData.Position.SectionFactor));
                             currentColumn = currentSection.Columns.Where(p => p.Order == sectionData.Position.SectionIndex).First();
                         }
@@ -1224,7 +1244,24 @@ namespace OfficeDevPnP.Core.Pages
                     section.Type = CanvasSectionTemplate.ThreeColumn;
                 }
             }
+            // Reindex the control order. We're starting control order from 1 for each column.
+            ReIndex();
+        }
 
+        private void ReIndex()
+        {
+            foreach (var section in this.sections.OrderBy(s => s.Order))
+            {
+                foreach (var column in section.Columns.OrderBy(c => c.Order))
+                {
+                    var indexer = 0;
+                    foreach (var control in column.Controls.OrderBy(c => c.Order))
+                    {
+                        indexer++;
+                        control.Order = indexer;
+                    }
+                }
+            }
         }
 
         private void ApplySectionAndColumn(CanvasControl control, ClientSideCanvasControlPosition position)
@@ -1239,7 +1276,6 @@ namespace OfficeDevPnP.Core.Pages
             var currentColumn = currentSection.Columns.Where(p => p.Order == position.SectionIndex).FirstOrDefault();
             if (currentColumn == null)
             {
-                //CanvasColumn newColumn = new CanvasColumn(currentSection);
                 currentSection.AddColumn(new CanvasColumn(currentSection, position.SectionIndex, position.SectionFactor));
                 currentColumn = currentSection.Columns.Where(p => p.Order == position.SectionIndex).First();
             }
@@ -1254,14 +1290,14 @@ namespace OfficeDevPnP.Core.Pages
 
             using (var handler = new HttpClientHandler())
             {
+                context.Web.EnsureProperty(w => w.Url);
                 // we're not in app-only or user + app context, so let's fall back to cookie based auth
                 if (String.IsNullOrEmpty(accessToken))
                 {
-                    handler.Credentials = context.Credentials;
-                    handler.CookieContainer.SetCookies(new Uri(context.Web.Url), (context.Credentials as SharePointOnlineCredentials).GetAuthenticationCookie(new Uri(context.Web.Url)));
+                    handler.SetAuthenticationCookies(context);
                 }
 
-                using (var httpClient = new HttpClient(handler))
+                using (var httpClient = new PnPHttpProvider(handler))
                 {
                     //GET https://bertonline.sharepoint.com/sites/130023/_api/web/GetClientSideWebParts HTTP/1.1
 
@@ -1276,7 +1312,7 @@ namespace OfficeDevPnP.Core.Pages
                         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
                     }
 
-                    HttpResponseMessage response = await httpClient.SendAsync(request);
+                    HttpResponseMessage response = await httpClient.SendAsync(request, new System.Threading.CancellationToken());
 
                     if (response.IsSuccessStatusCode)
                     {
@@ -1288,7 +1324,7 @@ namespace OfficeDevPnP.Core.Pages
                         throw new Exception(await response.Content.ReadAsStringAsync());
                     }
                 }
-                return await Task.Run(() => responseString);
+                return responseString;
             }
         }
 
