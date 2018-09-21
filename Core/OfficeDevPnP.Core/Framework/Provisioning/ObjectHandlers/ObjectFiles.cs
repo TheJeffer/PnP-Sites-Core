@@ -263,7 +263,7 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers
                 catch (ServerException ex)
                 {
                     // If this throws ServerException (does not belong to list), then shouldn't be trying to set properties)
-                    if (ex.Message != "The object specified does not belong to a list.")
+                    if (ex.ServerErrorCode != -2146232832)
                     {
                         throw;
                     }
@@ -496,6 +496,7 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers
             {
                 //Decode the URL and try again
                 fileName = WebUtility.UrlDecode(fileName);
+                container = WebUtility.UrlDecode(container);
                 stream = template.Connector.GetFileStream(fileName, container);
             }
 
@@ -557,7 +558,8 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers
                                 directory.Folder,
                                 directory.Overwrite,
                                 null, // No WebPartPages are supported with this technique
-                                metadataProperties != null ? metadataProperties[directory.Src + @"\" + file] : null,
+                                metadataProperties != null && metadataProperties.ContainsKey(directory.Src + @"\" + file) ? 
+                                    metadataProperties[directory.Src + @"\" + file] : null,
                                 directory.Security,
                                 directory.Level
                                 ));

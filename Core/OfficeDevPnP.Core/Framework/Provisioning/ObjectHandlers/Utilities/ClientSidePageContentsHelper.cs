@@ -52,7 +52,20 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers.Utilities
                         Publish = true,
                         Layout = pageToExtract.LayoutType.ToString(),
                         EnableComments = !pageToExtract.CommentsDisabled,
+                        Title = pageToExtract.PageTitle
                     };
+
+                    if(pageToExtract.PageHeader != null)
+                    {
+                        var extractedHeader = new ClientSidePageHeader()
+                        {
+                            Type = (ClientSidePageHeaderType)Enum.Parse(typeof(Pages.ClientSidePageHeaderType),pageToExtract.PageHeader.Type.ToString()),
+                            ServerRelativeImageUrl = TokenizeJsonControlData(web, pageToExtract.PageHeader.ImageServerRelativeUrl),
+                            TranslateX = pageToExtract.PageHeader.TranslateX,
+                            TranslateY = pageToExtract.PageHeader.TranslateY
+                        };
+                        extractedPageInstance.Header = extractedHeader;
+                    }
 
                     // Add the sections
                     foreach (var section in pageToExtract.Sections)
@@ -94,7 +107,7 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers.Utilities
                         {
                             foreach (var control in column.Controls)
                             {
-                                // Create control 
+                                // Create control
                                 CanvasControl controlInstance = new CanvasControl()
                                 {
                                     Column = column.Order,
@@ -115,7 +128,7 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers.Utilities
                                 }
                                 else
                                 {
-                                    // set ControlId to webpart id 
+                                    // set ControlId to webpart id
                                     controlInstance.ControlId = Guid.Parse((control as Pages.ClientSideWebPart).WebPartId);
                                     var webPartType = Pages.ClientSidePage.NameToClientSideWebPartEnum((control as Pages.ClientSideWebPart).WebPartId);
                                     switch (webPartType)
@@ -195,6 +208,9 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers.Utilities
                                         case Pages.DefaultClientSideWebParts.Spacer:
                                             controlInstance.Type = WebPartType.Spacer;
                                             break;
+                                        case Pages.DefaultClientSideWebParts.ClientWebPart:
+                                            controlInstance.Type = WebPartType.ClientWebPart;
+                                            break;
                                         case Pages.DefaultClientSideWebParts.ThirdParty:
                                             controlInstance.Type = WebPartType.Custom;
                                             break;
@@ -208,11 +224,11 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers.Utilities
                                     {
                                         // If we have serverProcessedContent then also export that one, it's important as some controls depend on this information to be present
                                         string serverProcessedContent = (control as Pages.ClientSideWebPart).ServerProcessedContent.ToString(Formatting.None);
-                                        controlInstance.JsonControlData = "{ \"serverProcessedContent\": " + serverProcessedContent + ", \"properties\": " + (control as Pages.ClientSideWebPart).PropertiesJson + "}";
+                                        controlInstance.JsonControlData = "{ \"dataVersion\": \"" + (control as Pages.ClientSideWebPart).DataVersion + "\", \"serverProcessedContent\": " + serverProcessedContent + ", \"properties\": " + (control as Pages.ClientSideWebPart).PropertiesJson + "}";
                                     }
                                     else
                                     {
-                                        controlInstance.JsonControlData = (control as Pages.ClientSideWebPart).PropertiesJson;
+                                        controlInstance.JsonControlData = "{ \"dataVersion\": \"" + (control as Pages.ClientSideWebPart).DataVersion + "\", \"properties\": " + (control as Pages.ClientSideWebPart).PropertiesJson + "}";
                                     }
 
                                     // Tokenize the JsonControlData
@@ -351,7 +367,7 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers.Utilities
                     {
                         if (template.WebSettings == null)
                         {
-                            template.WebSettings = new WebSettings();                            
+                            template.WebSettings = new WebSettings();
                         }
 
                         if (pageUrl.StartsWith(web.ServerRelativeUrl, StringComparison.InvariantCultureIgnoreCase))
@@ -361,7 +377,7 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers.Utilities
                         else
                         {
                             template.WebSettings.WelcomePage = pageUrl;
-                        }                        
+                        }
                     }
                 }
             }
@@ -414,6 +430,11 @@ namespace OfficeDevPnP.Core.Framework.Provisioning.ObjectHandlers.Utilities
 
         private string TokenizeJsonControlData(Web web, string json)
         {
+            if (string.IsNullOrEmpty(json))
+            {
+                return json;
+            }
+
             var lists = web.Lists;
             var site = (web.Context as ClientContext).Site;
             web.Context.Load(site, s => s.Id, s => s.GroupId);

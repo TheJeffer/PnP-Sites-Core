@@ -12,10 +12,8 @@ using System.Configuration;
 using System.Threading.Tasks;
 using System.Net.Http;
 using Newtonsoft.Json;
-using System.IdentityModel.Tokens;
-#if NETSTANDARD2_0
+using OfficeDevPnP.Core.Utilities.Async;
 using System.IdentityModel.Tokens.Jwt;
-#endif
 
 #if !ONPREMISES
 using OfficeDevPnP.Core.Sites;
@@ -49,8 +47,8 @@ namespace Microsoft.SharePoint.Client
         /// Clones a ClientContext object while "taking over" the security context of the existing ClientContext instance
         /// </summary>
         /// <param name="clientContext">ClientContext to be cloned</param>
-        /// <param name="siteUrl">Site url to be used for cloned ClientContext</param>
-        /// <returns>A ClientContext object created for the passed site url</returns>
+        /// <param name="siteUrl">Site URL to be used for cloned ClientContext</param>
+        /// <returns>A ClientContext object created for the passed site URL</returns>
         public static ClientContext Clone(this ClientRuntimeContext clientContext, string siteUrl)
         {
             if (string.IsNullOrWhiteSpace(siteUrl))
@@ -69,10 +67,11 @@ namespace Microsoft.SharePoint.Client
         /// <param name="retryCount">Number of times to retry the request</param>
         /// <param name="delay">Milliseconds to wait before retrying the request. The delay will be increased (doubled) every retry</param>
         /// <param name="userAgent">UserAgent string value to insert for this request. You can define this value in your app's config file using key="SharePointPnPUserAgent" value="PnPRocks"></param>
-        public static async Task ExecuteQueryRetryAsync(this ClientRuntimeContext clientContext, int retryCount = 10, int delay = 500, string userAgent = null)
+        public static Task ExecuteQueryRetryAsync(this ClientRuntimeContext clientContext, int retryCount = 10, int delay = 500, string userAgent = null)
         {
-            await ExecuteQueryImplementation(clientContext, retryCount, delay, userAgent);
+            return ExecuteQueryImplementation(clientContext, retryCount, delay, userAgent);
         }
+
 #endif
 
         /// <summary>
@@ -84,8 +83,8 @@ namespace Microsoft.SharePoint.Client
         /// <param name="userAgent">UserAgent string value to insert for this request. You can define this value in your app's config file using key="SharePointPnPUserAgent" value="PnPRocks"></param>
         public static void ExecuteQueryRetry(this ClientRuntimeContext clientContext, int retryCount = 10, int delay = 500, string userAgent = null)
         {
-#if !ONPREMISES
-            ExecuteQueryImplementation(clientContext, retryCount, delay, userAgent).GetAwaiter().GetResult();
+#if !ONPREMISES            
+            Task.Run(() => ExecuteQueryImplementation(clientContext, retryCount, delay, userAgent)).GetAwaiter().GetResult();
 #else
             ExecuteQueryImplementation(clientContext, retryCount, delay, userAgent);
 #endif
@@ -97,6 +96,11 @@ namespace Microsoft.SharePoint.Client
         private static void ExecuteQueryImplementation(ClientRuntimeContext clientContext, int retryCount = 10, int delay = 500, string userAgent = null)
 #endif
         {
+
+#if !ONPREMISES
+            await new SynchronizationContextRemover();
+#endif
+
             var clientTag = string.Empty;
             if (clientContext is PnPClientContext)
             {
@@ -134,7 +138,11 @@ namespace Microsoft.SharePoint.Client
 
                     // DO NOT CHANGE THIS TO EXECUTEQUERYRETRY
 #if !ONPREMISES
+#if !NETSTANDARD2_0
                     await clientContext.ExecuteQueryAsync();
+#else
+                    clientContext.ExecuteQuery();
+#endif
 #else
                     clientContext.ExecuteQuery();
 #endif
@@ -224,8 +232,8 @@ namespace Microsoft.SharePoint.Client
         /// Clones a ClientContext object while "taking over" the security context of the existing ClientContext instance
         /// </summary>
         /// <param name="clientContext">ClientContext to be cloned</param>
-        /// <param name="siteUrl">Site url to be used for cloned ClientContext</param>
-        /// <returns>A ClientContext object created for the passed site url</returns>
+        /// <param name="siteUrl">Site URL to be used for cloned ClientContext</param>
+        /// <returns>A ClientContext object created for the passed site URL</returns>
         public static ClientContext Clone(this ClientRuntimeContext clientContext, Uri siteUrl)
         {
             if (siteUrl == null)
@@ -510,6 +518,8 @@ namespace Microsoft.SharePoint.Client
         /// <returns></returns>
         public static async Task<string> GetRequestDigest(this ClientContext context)
         {
+            await new SynchronizationContextRemover();
+
             //InitializeSecurity(context);
 
             using (var handler = new HttpClientHandler())
@@ -568,6 +578,8 @@ namespace Microsoft.SharePoint.Client
         /// <returns></returns>
         public static async Task<ClientContext> CreateSiteAsync(this ClientContext clientContext, CommunicationSiteCollectionCreationInformation siteCollectionCreationInformation)
         {
+            await new SynchronizationContextRemover();
+
             return await SiteCollection.CreateAsync(clientContext, siteCollectionCreationInformation);
         }
 
@@ -579,6 +591,8 @@ namespace Microsoft.SharePoint.Client
         /// <returns></returns>
         public static async Task<ClientContext> CreateSiteAsync(this ClientContext clientContext, TeamSiteCollectionCreationInformation siteCollectionCreationInformation)
         {
+            await new SynchronizationContextRemover();
+
             return await SiteCollection.CreateAsync(clientContext, siteCollectionCreationInformation);
         }
 
@@ -590,6 +604,8 @@ namespace Microsoft.SharePoint.Client
         /// <returns>The clientcontext of the groupified site</returns>
         public static async Task<ClientContext> GroupifySiteAsync(this ClientContext clientContext, TeamSiteCollectionGroupifyInformation siteCollectionGroupifyInformation)
         {
+            await new SynchronizationContextRemover();
+
             return await SiteCollection.GroupifyAsync(clientContext, siteCollectionGroupifyInformation);
         }
 
@@ -601,6 +617,8 @@ namespace Microsoft.SharePoint.Client
         /// <returns>True if in use, false otherwise</returns>
         public static async Task<bool> AliasExistsAsync(this ClientContext clientContext, string alias)
         {
+            await new SynchronizationContextRemover();
+
             return await SiteCollection.AliasExistsAsync(clientContext, alias);
         }
 #endif
